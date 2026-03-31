@@ -1,0 +1,19 @@
+# ============================================================
+# SQTM Research Project — Dependencies
+# Systolic Quantum Teleportation Memory
+# Authors: Danny Valerio-Ramírez & Santiago Núñez-Corrales
+# Environment: Python 3.11 | Generated: 2026-03-31
+# ============================================================
+
+# ── Quantum Computing Core ───────────────────────────────────
+qiskit==1.4.2                   # Core SDK: circuits, transpiler, primitives
+qiskit-aer==0.15.1              # High-performance noisy simulation (T1/T2)
+qiskit-ibm-runtime==0.34.0      # IBM backend access & calibration data extraction
+
+# ── Mathematics & Scientific Computing ──────────────────────
+numpy==1.26.4                   # N-dimensional arrays & linear algebra
+scipy==1.13.1                   # Advanced math: linalg, stats, optimize
+
+# ── Visualization ────────────────────────────────────────────
+matplotlib==3.9.2               # Plots, histograms, fidelity curves
+pylatexenc==2.10                # LaTeX-style circuit rendering in Qiskit
