@@ -10,36 +10,29 @@ Quantum memory architecture based on systolic teleportation to mitigate decohere
 
 ```
 SQTM/
-├── Contexto/               # Research context: paper drafts, phase plans, literature
 ├── src/                    # Source code (implemented phase by phase)
-│   ├── __init__.py
-│   ├── phase_a/            # Phase A — Modular building blocks
-│   │   ├── __init__.py
-│   │   ├── teleportation.py    # Deterministic teleportation module
-│   │   ├── register.py         # Systolic register (R, Q, R_ab)
-│   │   └── qpc.py              # Quantum Program Counter controller
-│   ├── phase_b/            # Phase B — Noise environment setup
-│   │   ├── __init__.py
-│   │   ├── noise_model.py      # T1/T2 noise model from IBM calibration
-│   │   └── simulator.py        # AerSimulator wrapper
-│   └── utils/              # Shared utilities
-│       ├── __init__.py
-│       └── visualization.py    # Circuit drawing & fidelity plots
+│   └── __init__.py
 ├── tests/                  # Unit & integration tests (pytest)
-│   ├── __init__.py
-│   ├── test_teleportation.py
-│   ├── test_register.py
-│   └── test_noise_model.py
-├── notebooks/              # Jupyter exploration notebooks
-│   └── 00_env_validation.ipynb
 ├── data/                   # Calibration data from IBM backends (JSON)
-│   └── .gitkeep
 ├── results/                # Simulation outputs, figures, metrics (CSV/PNG)
-│   └── .gitkeep
+├── .venv/                  # Python 3.11 virtual environment (not tracked)
 ├── requirements.txt        # Pinned dependencies
-├── check_env.py            # Environment validation script
 └── README.md               # This file
 ```
+
+---
+
+## Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `qiskit` | 1.4.2 | Core SDK: circuits, transpiler, primitives |
+| `qiskit-aer` | 0.15.1 | High-performance noisy simulation (T1/T2) |
+| `qiskit-ibm-runtime` | 0.34.0 | IBM backend access & calibration data |
+| `numpy` | 1.26.4 | N-dimensional arrays & linear algebra |
+| `scipy` | 1.13.1 | Advanced math: linalg, stats, optimize |
+| `matplotlib` | 3.9.2 | Plots, histograms, fidelity curves |
+| `pylatexenc` | 2.10 | LaTeX-style circuit rendering in Qiskit |
 
 ---
 
@@ -57,20 +50,14 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Validate Environment
-```powershell
-python check_env.py
-```
-
-Expected output: `🟢 ENVIRONMENT OK — Ready for SQTM development.`
-
 ---
 
 ## Development Phases
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| **A** | Modular building blocks (teleportation, registers, QPC) | 🔲 Pending |
-| **B** | Noise environment (T1/T2 from IBM real backends) | 🔲 Pending |
-| **C** | Benchmark simulation (static vs SQTM fidelity) | 🔲 Pending |
-| **D** | Real hardware execution (ibm_kyiv / ibm_brisbane) | 🔲 Pending |
+| **0 — Environment** | venv, dependencies, project structure | ✅ Done |
+| **A — Building Blocks** | Deterministic teleportation, systolic registers, QPC | 🔲 Next |
+| **B — Noise Model** | T1/T2 from IBM real backends via `qiskit-ibm-runtime` | 🔲 Pending |
+| **C — Benchmark** | Fidelity comparison: static memory vs SQTM | 🔲 Pending |
+| **D — Real Hardware** | Execution on `ibm_kyiv` / `ibm_brisbane` | 🔲 Pending |
