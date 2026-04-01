@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "quantum.qsharp-lang-vscode",
+        "GitHub.copilot-chat",
+        "ms-vscode.makefile-tools"
+    ]
+}
