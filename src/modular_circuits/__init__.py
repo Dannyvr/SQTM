@@ -5,11 +5,14 @@ SQTM Modular Circuits Package
 Provides the fundamental building blocks for the
 Systolic Quantum Teleportation Memory (SQTM) architecture.
 
-Phase A modules:
+Core circuit components:
     - register : SQTMRegisters – canonical register layout for one SQTM cycle.
+    - operation_register : OperationRegister – quantum CPU workspace.
+
+Note: Quantum algorithms/functions are in src.functions (e.g., SystolicTeleportation, SystolicWorkPhase)
 """
 
 from .register import StorageRegister
-from .teleportation import SystolicTeleportation
+from .operation_register import OperationRegister
 
-__all__ = ["StorageRegister", "SystolicTeleportation"]
+__all__ = ["StorageRegister", "OperationRegister"]

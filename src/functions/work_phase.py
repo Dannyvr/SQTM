@@ -1,3 +1,8 @@
+# ============================================================
+# SQTM Research Project — Systolic Work Phase Module
+# Systolic Quantum Teleportation Memory
+# Authors: Danny Valerio-Ramírez & Santiago Núñez-Corrales
+# ============================================================
 
 from qiskit.circuit import QuantumCircuit, QuantumRegister
 
