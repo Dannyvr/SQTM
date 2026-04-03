@@ -8,7 +8,7 @@
 # ── Quantum Computing Core ───────────────────────────────────
 qiskit==1.4.2                   # Core SDK: circuits, transpiler, primitives
 qiskit-aer==0.15.1              # High-performance noisy simulation (T1/T2)
-qiskit-ibm-runtime==0.34.0      # IBM backend access & calibration data extraction
+qiskit-ibm-runtime==0.34.0      # IBM backend access, calibration data & FakeKyiv (fake_provider)
 
 # ── Mathematics & Scientific Computing ──────────────────────
 numpy==1.26.4                   # N-dimensional arrays & linear algebra

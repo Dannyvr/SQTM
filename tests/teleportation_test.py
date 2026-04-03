@@ -15,7 +15,7 @@ from qiskit import QuantumCircuit, ClassicalRegister, transpile
 from qiskit.circuit import QuantumRegister
 from qiskit_aer import AerSimulator
 
-from src.modular_circuits.register import StorageRegister
+from src.modular_circuits.memory_register import StorageRegister
 from src.functions.teleportation import SystolicTeleportation
 
 
