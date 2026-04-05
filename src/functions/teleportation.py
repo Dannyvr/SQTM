@@ -4,7 +4,7 @@
 # Authors: Danny Valerio-Ramírez & Santiago Núñez-Corrales
 # ============================================================
 
-from typing import cast
+from typing import cast, Dict, Tuple
 from qiskit import QuantumCircuit
 from qiskit.circuit import QuantumRegister, ClassicalRegister, Clbit
 
@@ -21,6 +21,9 @@ class SystolicTeleportation:
             Name identifier for this teleportation bus, by default "systolic_teleportation"
         """
         self.name = name
+        # Cache de registros ancilla y clásicos por par lógico (source_name, dest_name)
+        self._ancilla_cache: Dict[Tuple[str, str], QuantumRegister] = {}
+        self._crbell_cache: Dict[Tuple[str, str], ClassicalRegister] = {}
 
     def build_circuit(
         self,
@@ -42,16 +45,39 @@ class SystolicTeleportation:
             )
         
         # ──────────────────────────────────────────────────────────────
-        # 1. INSTANTIATE BUS INTERNAL RESOURCES (Dynamic, based on N)
+        # 1. GET OR CREATE BUS INTERNAL RESOURCES (Reuse on multiple calls)
         # ──────────────────────────────────────────────────────────────
         
-        # Internal ancilla register for Bell pair generation (N qubits)
-        ancilla_reg = QuantumRegister(N, name="ancilla_ab")
-        qc.add_register(ancilla_reg)
+        # Create a key for caching: (source_name, dest_name)
+        cache_key = (source_reg.name, dest_reg.name)
         
-        # Classical register for Bell measurement results (2*N bits)
-        cr_bell = ClassicalRegister(2 * N, name="cr_bell")
-        qc.add_register(cr_bell)
+        # Check if ancilla and classical registers already exist
+        if cache_key not in self._ancilla_cache:
+            # PRIMERA VEZ: Crear los registros ancilla y clásico
+            ancilla_name = f"ancilla_{source_reg.name}_to_{dest_reg.name}"
+            cr_bell_name = f"cr_bell_{source_reg.name}_to_{dest_reg.name}"
+            
+            # Internal ancilla register for Bell pair generation (N qubits)
+            ancilla_reg = QuantumRegister(N, name=ancilla_name)
+            qc.add_register(ancilla_reg)
+            self._ancilla_cache[cache_key] = ancilla_reg
+            
+            # Classical register for Bell measurement results (2*N bits)
+            cr_bell = ClassicalRegister(2 * N, name=cr_bell_name)
+            qc.add_register(cr_bell)
+            self._crbell_cache[cache_key] = cr_bell
+            
+            print(f"[Teleportation] Created ancilla pair for {source_reg.name} -> {dest_reg.name}")
+        else:
+            # SIGUIENTES VECES: Reutilizar los registros existentes
+            ancilla_reg = self._ancilla_cache[cache_key]
+            cr_bell = self._crbell_cache[cache_key]
+            
+            # Reset ancilla qubits at the start of reuse
+            for q in ancilla_reg:
+                qc.reset(q)
+            
+            print(f"[Teleportation] Reusing ancilla pair for {source_reg.name} -> {dest_reg.name}")
         
         # ──────────────────────────────────────────────────────────────
         # 2. PARALLEL TELEPORTATION LOOP (over all N qubits)

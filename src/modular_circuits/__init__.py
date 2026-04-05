@@ -2,6 +2,6 @@
 
 from .memory_register import StorageRegister
 from .operation_register import OperationRegister
-from .qpc import BipartiteQPC
+from .qpc import QPC
 
-__all__ = ["StorageRegister", "OperationRegister", "BipartiteQPC"]
+__all__ = ["StorageRegister", "OperationRegister", "QPC"]

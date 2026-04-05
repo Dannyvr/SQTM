@@ -11,7 +11,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import QuantumRegister, ClassicalRegister, Clbit
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
-from qiskit_ibm_runtime.fake_provider import FakeKyiv
+from qiskit_ibm_runtime.fake_provider import FakeBrisbane
 
 
 # =============================================================================
@@ -43,8 +43,8 @@ class CMaxValidator:
         self.d = 2 ** self.N  # Hilbert space dimension per register
         self.B_ideal = 1.0 / self.d
 
-        # 1. Reference backend (calibration snapshot from real IBM Kyiv)
-        self.backend = FakeKyiv()
+        # 1. Reference backend (calibration snapshot from real IBM Brisbane)
+        self.backend = FakeBrisbane()
 
         # 2. Complete noise model (depolarization + thermal relaxation)
         self.noise_model = NoiseModel.from_backend(self.backend)
