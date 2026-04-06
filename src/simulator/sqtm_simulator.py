@@ -11,7 +11,7 @@ import os
 import numpy as np
 
 # Ensure project root is in path for direct execution
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, circuit, transpile
 from qiskit_ibm_runtime.fake_provider import FakeKyiv, FakeBrisbane
@@ -23,6 +23,7 @@ from src.modular_circuits.memory_register import StorageRegister
 from src.modular_circuits.operation_register import OperationRegister
 from src.functions.work_phase import SystolicWorkPhase
 from src.functions.teleportation import SystolicTeleportation
+from src.functions.qubit_mapper import QubitMapper
 
 
 class SQTMCompiler:
@@ -62,7 +63,7 @@ class SQTMCompiler:
         t_max_ns : float
             Maximum passive desgaste threshold (idle time in nanoseconds).
         backend_name : str, optional
-            Name of fake backend for compilation. Default is "FakeBrisbane".
+            Name of fake backend for compilation. Default is "FakeKyiv".
         """
         self.R = R
         self.n = n
@@ -72,21 +73,23 @@ class SQTMCompiler:
         # ──────────────────────────────────────────────────────────
         # 1. Initialize backend and qubit resources
         # ──────────────────────────────────────────────────────────
-        
-        if backend_name == "FakeKyiv":
-            self.backend = FakeKyiv()
-        elif backend_name == "FakeBrisbane":
-            self.backend = FakeBrisbane()
-        else:
-            raise ValueError(f"Unsupported backend: {backend_name}. Use 'FakeKyiv' or 'FakeBrisbane'.")
+        # NOTE: Aligned with SwapCompiler — using FakeKyiv for consistency
+        self.backend = FakeKyiv()
+        self.noise_model = NoiseModel.from_backend(self.backend)
 
-        self.available_qubits: List[int] = list(
-            range(self.backend.configuration().n_qubits)
-        )
+        # Initialize QubitMapper for intelligent qubit allocation
+        self.qubit_mapper = QubitMapper(self.backend)
+        
         self.logical_to_physical_map: Dict[Any, int] = {}
         """
         Maps qubit_obj (Qubit) -> physical_qubit_id.
         Stores the allocated physical qubit index for each logical qubit object.
+        """
+        
+        self.qubit_register_map: Dict[int, str] = {}
+        """
+        Maps physical_qubit_id -> register_name.
+        Used for validation and tracking.
         """
 
         # ──────────────────────────────────────────────────────────
@@ -131,7 +134,7 @@ class SQTMCompiler:
         self._built_registers: Dict[str, QuantumRegister] = {}
 
         print(f"[SQTM Compiler] Initialized: R={R}, n={n}, c_max={c_max}, t_max={t_max_ns} ns")
-        print(f"[Backend] {self.backend.__class__.__name__} with {len(self.available_qubits)} qubits")
+        print(f"[Backend] {self.backend.__class__.__name__} with {self.qubit_mapper.n_qubits} qubits")
 
     # ──────────────────────────────────────────────────────────────
     # QUBIT ALLOCATION & PHYSICAL MAPPING
@@ -144,7 +147,9 @@ class SQTMCompiler:
         quantum_register: QuantumRegister,
     ) -> None:
         """
-        Allocate contiguous physical qubits from the backend for a logical register.
+        Allocate connected physical qubits from the backend for a logical register.
+
+        Uses QubitMapper to find connected subgraphs respecting hardware topology.
 
         Parameters
         ----------
@@ -158,29 +163,23 @@ class SQTMCompiler:
         Raises
         ------
         RuntimeError
-            If not enough contiguous qubits are available.
+            If not enough connected qubits are available.
         """
         required_qubits = quantum_register.size
+        register_id = quantum_register.name
 
-        if len(self.available_qubits) < required_qubits:
-            raise RuntimeError(
-                f"Not enough qubits available. Need {required_qubits}, "
-                f"but only {len(self.available_qubits)} remain."
-            )
-
-        # Allocate contiguous block (NISQ devices benefit from spatial locality)
-        allocated = self.available_qubits[:required_qubits]
-        self.available_qubits = self.available_qubits[required_qubits:]
+        # Use QubitMapper to find connected subgraph
+        allocated = self.qubit_mapper.allocate_register(
+            register_type=register_type,
+            register_id=register_id,
+            size=required_qubits
+        )
 
         # Map the actual qubit objects to physical indices
         for local_idx, physical_qubit in enumerate(allocated):
             qubit_obj = quantum_register[local_idx]
             self.logical_to_physical_map[qubit_obj] = physical_qubit
-
-        print(
-            f"[Allocation] {register_type}[{logical_addr}]: "
-            f"{quantum_register.name} -> physical qubits {allocated}"
-        )
+            self.qubit_register_map[physical_qubit] = register_id
 
     def _get_initial_layout(self, qc: QuantumCircuit) -> List[int]:
         """
@@ -230,26 +229,58 @@ class SQTMCompiler:
 
         # ──────────────────────────────────────────────────────────
         # Phase 0: Build register instances and allocate physical qubits
+        # ALIGNED WITH SWAP_SIMULATOR: Use chain topology allocation
         # ──────────────────────────────────────────────────────────
 
         qc = QuantumCircuit()
 
-        # Build and allocate memory registers (Original + Backup)
+        # Build all register instances (logical) first
         for i in range(self.R):
             qr_orig = self.memory_registers_original[i].build()
             qr_backup = self.memory_registers_backup[i].build()
             qc.add_register(qr_orig)
             qc.add_register(qr_backup)
-            self._allocate_physical_qubits("mem_orig", i, qr_orig)
-            self._allocate_physical_qubits("mem_backup", i, qr_backup)
             self._built_registers[f"mem_orig_{i}"] = qr_orig
             self._built_registers[f"mem_backup_{i}"] = qr_backup
 
-        # Build and allocate operation register
         qr_opreg = self.operation_register.build()
         qc.add_register(qr_opreg)
-        self._allocate_physical_qubits("opreg", 0, qr_opreg)
         self._built_registers["opreg"] = qr_opreg
+
+        # ──────────────────────────────────────────────────────────
+        # CHAIN TOPOLOGY ALLOCATION (ALIGNED WITH SWAP_SIMULATOR)
+        # ──────────────────────────────────────────────────────────
+        # Structure: OpReg — Mem_Orig_0 — Mem_Backup_0 — Mem_Orig_1 — Mem_Backup_1 — ...
+        # This ensures direct connectivity without routing SWAPs with optimization_level=0
+        # ──────────────────────────────────────────────────────────
+        
+        print("\n[Compilation] Allocating chain topology (OpReg—Mem_Orig—Mem_Backup—...)...")
+        
+        # Build chain configuration: OpReg + Original + Backup registers in sequence
+        chain_config = [("opreg", self.n)]
+        for i in range(self.R):
+            chain_config.append((f"mem_orig_{i}", self.n))
+            chain_config.append((f"mem_backup_{i}", self.n))
+        
+        # Allocate the linear chain
+        allocation_map = self.qubit_mapper.allocate_chain_topology(chain_config)
+        
+        # Map logical qubits to physical qubits for all registers
+        for reg_id, physical_qubits in allocation_map.items():
+            if reg_id == "opreg":
+                qr = self._built_registers["opreg"]
+            else:
+                # mem_orig_*, mem_backup_*
+                qr = self._built_registers[reg_id]
+            
+            for local_idx, physical_qubit in enumerate(physical_qubits):
+                qubit_obj = qr[local_idx]
+                self.logical_to_physical_map[qubit_obj] = physical_qubit
+                self.qubit_register_map[physical_qubit] = reg_id
+
+        print(f"[Compilation] Physical qubit mapping:")
+        for reg_id, phys_qubits in allocation_map.items():
+            print(f"  {reg_id:20s} → {sorted(phys_qubits)}")
 
         print(f"\n[Compilation] Starting workload processing: {len(workload)} instructions")
 
@@ -332,7 +363,7 @@ class SQTMCompiler:
             else:
                 print(f"  [WARNING] Unknown instruction: {instruction}")
             qc.barrier()  # Prevent inter-SWAP optimization
-            print(qc.draw(output="text"))   
+            #print(qc.draw(output="text"))   
 
         print(f"[Compilation] Workload processing complete")
         return qc
@@ -446,6 +477,7 @@ class SQTMCompiler:
             
             # 2. Inicializar el simulador y su modelo de ruido usando Matrix Product State (MPS)
             # MPS permite simular los 127 qubits del backend sin explotar la memoria RAM.
+            print(qc_measured.draw(output="text"))
             print("[Noise Model] Extracting noise characteristics...")
             noise_model = NoiseModel.from_backend(self.backend)
             simulator = AerSimulator(noise_model=noise_model, method='matrix_product_state')
@@ -525,111 +557,6 @@ class SQTMCompiler:
             "current_c": self.current_c,
             "current_t": self.current_t,
             "logical_to_physical_map": self.logical_to_physical_map,
-            "available_qubits": len(self.available_qubits),
+            "available_qubits": len(self.qubit_mapper.available_qubits),
         }
 
-
-# ============================================================
-# MAIN: Test Harness
-# ============================================================
-
-def main():
-    """
-    Main test harness for the SQTM Compiler.
-    """
-
-    print("=" * 70)
-    print("SQTM Compiler - Quantum Teleportation Memory Architecture")
-    print("=" * 70)
-
-    # ──────────────────────────────────────────────────────────
-    # Configuration
-    # ──────────────────────────────────────────────────────────
-
-    R = 2  # Number of logical memory registers
-    n = 1  # Qubits per register (quantum word width)
-    c_max = 2  # Gate cost threshold
-    t_max_ns = 5000.0  # Time threshold (nanoseconds)
-
-    # ──────────────────────────────────────────────────────────
-    # Create compiler
-    # ──────────────────────────────────────────────────────────
-
-    compiler = SQTMCompiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns, backend_name="FakeBrisbane")
-
-    # ──────────────────────────────────────────────────────────
-    # Define workload
-    # ──────────────────────────────────────────────────────────
-
-
-    workload = [
-        "READ_00",
-        "IDLE_4",
-        "IDLE_4",
-        "IDLE_6",
-        "WRITE_00",
-        "IDLE_8",
-        "IDLE_10",
-        "IDLE_2",
-        "IDLE_2",
-        "READ_00",
-        "IDLE_8",
-        "WRITE_00",
-    ]
-
-    print(f"\n[Workload] Executing {len(workload)} instructions:")
-    for i, instr in enumerate(workload, 1):
-        print(f"  {i}. {instr}")
-
-    # ──────────────────────────────────────────────────────────
-    # Compile workload
-    # ──────────────────────────────────────────────────────────
-
-    circuit = compiler.compile_workload(workload)
-
-    print(f"\n[Circuit] Generated circuit:")
-    print(f"  Qubits: {circuit.num_qubits}")
-    print(f"  Clbits: {circuit.num_clbits}")
-    print(f"  Depth: {circuit.depth()}")
-    print(f"  Size: {circuit.size()}")
-    
-
-    # ──────────────────────────────────────────────────────────
-    # Compiler state
-    # ──────────────────────────────────────────────────────────
-
-    state = compiler.get_compiler_state()
-    print(f"\n[Compiler State]")
-    print(f"  Location Map: {state['location_map']}")
-    print(f"  Current C counters: {state['current_c']}")
-    print(f"  Current T counters: {state['current_t']}")
-    print(f"  Available physical qubits: {state['available_qubits']}")
-
-    # ──────────────────────────────────────────────────────────
-    # Run simulation
-    # ──────────────────────────────────────────────────────────
-
-    print("\n" + "=" * 70)
-    print("SIMULATION PHASE")
-    print("=" * 70)
-
-    try:
-        results = compiler.run_simulation(circuit, shots=2048)
-        
-        print(f"\n[Simulation Results]")
-        print(f"  Fidelity: {results['fidelity']:.4f}")
-        print(f"  Total Shots: {results['total_shots']}")
-        print(f"  Sample Counts (first 5): {dict(list(results['counts'].items())[:5])}")
-
-    except Exception as e:
-        print(f"[Error] Simulation failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("\n" + "=" * 70)
-    print("COMPILATION & SIMULATION COMPLETE")
-    print("=" * 70)
-
-
-if __name__ == "__main__":
-    main()

@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib
@@ -11,7 +12,15 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import QuantumRegister, ClassicalRegister, Clbit
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
-from qiskit_ibm_runtime.fake_provider import FakeBrisbane
+from qiskit_ibm_runtime.fake_provider import FakeKyiv
+
+# Handle imports for both direct execution and module import
+try:
+    from src.functions.qubit_mapper import QubitMapper
+except ModuleNotFoundError:
+    # Add parent directory to path for direct script execution
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+    from src.functions.qubit_mapper import QubitMapper
 
 
 # =============================================================================
@@ -44,7 +53,7 @@ class CMaxValidator:
         self.B_ideal = 1.0 / self.d
 
         # 1. Reference backend (calibration snapshot from real IBM Brisbane)
-        self.backend = FakeBrisbane()
+        self.backend = FakeKyiv()
 
         # 2. Complete noise model (depolarization + thermal relaxation)
         self.noise_model = NoiseModel.from_backend(self.backend)
@@ -89,55 +98,40 @@ class CMaxValidator:
             f"Available gates: {sorted(gate_errors.keys())}."
         )
 
-    # ── Extraction of physical chains for 4-register architecture ────────────
+    # ── Physical chain allocation via QubitMapper (NEW UNIFIED APPROACH) ──────
 
     def _get_physical_chains(self) -> list[tuple[int, int, int, int]]:
         """
-        Find N disjoint chains of exactly 4 qubits each.
-        Each chain is a path: O — S — LA — LB (all must be connected by edges).
+        Find N disjoint chains of exactly 4 qubits each using QubitMapper.
+        
+        Each chain is a path: S — O — LA — LB (all must be connected by edges).
+        This now delegates to QubitMapper.allocate_chain_topology() for scalability.
+        
         Returns: list of tuples (storage, operation, link_alice, link_bob)
         """
-        coupling_map = self.backend.coupling_map
+        # Create an instance of QubitMapper from the backend
+        mapper = QubitMapper(self.backend)
         
-        # Build adjacency dictionary (bidirectional)
-        adj = {}
-        for a, b in coupling_map.get_edges():
-            adj.setdefault(a, set()).add(b)
-            adj.setdefault(b, set()).add(a)
-
+        # Build a single long chain for all registers
+        # Chain structure: S_0 — O_0 — LA_0 — LB_0 — S_1 — O_1 — LA_1 — LB_1 — ...
+        chain_config = []
+        for i in range(self.N):
+            chain_config.append((f"S_{i}", 1))
+            chain_config.append((f"O_{i}", 1))
+            chain_config.append((f"LA_{i}", 1))
+            chain_config.append((f"LB_{i}", 1))
+        
+        # Allocate the unified chain
+        allocation = mapper.allocate_chain_topology(chain_config)
+        
+        # Convert allocation back to original tuple format
         chains = []
-        used_global = set()
-        
-        def find_chain_from(start_o: int) -> tuple[int, int, int, int] | None:
-            """Try to find a 4-qubit chain starting from qubit 'start_o' (Operation qubit)."""
-            if start_o in used_global:
-                return None
-            
-            candidates_s = adj.get(start_o, set()) - used_global
-            for s in candidates_s:
-                candidates_la = adj.get(s, set()) - used_global - {start_o}
-                for la in candidates_la:
-                    candidates_lb = adj.get(la, set()) - used_global - {start_o, s}
-                    for lb in candidates_lb:
-                        # Found valid disjoint chain!
-                        return (s, start_o, la, lb)
-            return None
-        
-        # Greedy: try each qubit as a potential Operation qubit
-        for o in sorted(adj.keys()):
-            if len(chains) >= self.N:
-                break
-            chain = find_chain_from(o)
-            if chain:
-                chains.append(chain)
-                used_global.update(chain)
-
-        if len(chains) < self.N:
-            raise ValueError(
-                f"Hardware does not support this word width. "
-                f"Need {self.N} chains of 4 qubits, found {len(chains)}. "
-                f"Backend: {self.backend.name}."
-            )
+        for i in range(self.N):
+            s_qubit = allocation[f"S_{i}"][0]
+            o_qubit = allocation[f"O_{i}"][0]
+            la_qubit = allocation[f"LA_{i}"][0]
+            lb_qubit = allocation[f"LB_{i}"][0]
+            chains.append((s_qubit, o_qubit, la_qubit, lb_qubit))
         
         return chains
     # ── Empirical fidelity with 4-register teleportation protocol ────────────
@@ -261,7 +255,7 @@ class CMaxValidator:
         # ────────────────────────────────────────────────────────────────────
         
         sim  = AerSimulator(noise_model=self.noise_model)
-        qc_t = transpile(qc, backend=sim, optimization_level=0, initial_layout=initial_layout)
+        qc_t = transpile(qc, backend=self.backend, optimization_level=0, initial_layout=initial_layout)
         job  = sim.run(qc_t, shots=shots)
         counts: dict[str, int] = job.result().get_counts()
 
@@ -521,13 +515,13 @@ class CMaxValidator:
 
 if __name__ == "__main__":
     # ── DEFINE THE ARCHITECTURE (N = Word width per register) ─────────────────
-    N_qubits = 3
+    N_qubits = 1
     validator = CMaxValidator(N=N_qubits)
     
 
     # ── Phase B.1: Complete RB characterization with teleportation ────────────
-    m_list = [0, 1, 2, 4, 6, 8, 10, 15, 20, 25, 30]
-    popt = validator.run_rb_characterization(m_list, shots=4000)
+    m_list = [0, 1, 2, 4, 6, 8, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100]
+    popt = validator.run_rb_characterization(m_list, shots=4000, plot_path = "results/rb_decay_curve n="+ str(N_qubits) +".png")
 
     # ── Phase B.2: Print results and validate model ───────────────────────────
     r_emp = validator.print_rb_results(popt)

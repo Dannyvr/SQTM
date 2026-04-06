@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib
@@ -10,6 +11,14 @@ from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 from qiskit_ibm_runtime.fake_provider import FakeKyiv
+
+# Handle imports for both direct execution and module import
+try:
+    from src.functions.qubit_mapper import QubitMapper
+except ModuleNotFoundError:
+    # Add parent directory to path for direct script execution
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+    from src.functions.qubit_mapper import QubitMapper
 
 
 # =============================================================================
@@ -35,7 +44,7 @@ class CMaxValidator:
        
         # 0. Dynamic word width parameter
         self.N = N
-        self.d = 2 ** (2 * N)
+        self.d = 2 ** self.N
         self.B_ideal = 1.0 / self.d
 
         # 1. Reference backend (calibration snapshot from real IBM Kyiv)
@@ -84,39 +93,7 @@ class CMaxValidator:
             f"Available gates: {sorted(gate_errors.keys())}."
         )
 
-    # ── Extraction of disjoint qubit pairs ────────────────────────────────────
 
-    def _get_physical_pairs(self) -> list[tuple[int, int]]:
-        
-        coupling_map = self.backend.coupling_map
-        edges = coupling_map.get_edges()
-
-        # Convert to bidirectional tuple list
-        # (ensure both directions are available)
-        all_edges = set()
-        for a, b in edges:
-            all_edges.add((a, b))
-            all_edges.add((b, a))
-
-        # Find self.N disjoint pairs using greedy algorithm
-        physical_pairs: list[tuple[int, int]] = []
-        used_qubits: set[int] = set()
-
-        for q1, q2 in edges:
-            # If both qubits are available and pair exists
-            if q1 not in used_qubits and q2 not in used_qubits:
-                physical_pairs.append((q1, q2))
-                used_qubits.add(q1)
-                used_qubits.add(q2)
-                if len(physical_pairs) == self.N:
-                    return physical_pairs
-
-        # If we reach here, insufficient disjoint pairs
-        raise ValueError(
-            f"Hardware does not support this word width. "
-            f"Need {self.N} disjoint pairs but only found "
-            f"{len(physical_pairs)}. Backend: {self.backend.name}."
-        )
 
     # ── Empirical fidelity (noisy WorkPhase) ──────────────────────────────────
 
@@ -125,8 +102,7 @@ class CMaxValidator:
         if n_swaps < 0:
             raise ValueError(f"n_swaps must be >= 0, received: {n_swaps}")
 
-        qc = QuantumCircuit(2 * self.N, 2 * self.N)
-
+        qc = QuantumCircuit(2 * self.N, self.N)
         for _ in range(n_swaps):
             for i in range(self.N):
                 qc.cx(i, i + self.N)        # CNOT1
@@ -134,30 +110,36 @@ class CMaxValidator:
                 qc.cx(i, i + self.N)        # CNOT3
             qc.barrier()   # Prevents inter-SWAP optimization by transpiler
 
-        qc.measure(range(2 * self.N), range(2 * self.N))
+        qc.measure(range(self.N), range(self.N))
+        # print(qc.draw(output="text"))  # Commented: Unicode encoding issues on Windows
 
         # ── Hardware-Aware Qubit Mapping ──────────────────────────────────────
-        # Get disjoint physical pairs from backend
-        physical_pairs = self._get_physical_pairs()
+        # Use QubitMapper to guarantee chain topology allocation
+        # This ensures direct connectivity without routing SWAPs
+        # Chain structure: OpReg → Mem_0
+        mapper = QubitMapper(self.backend)
+        allocation = mapper.allocate_chain_topology(
+            chain_config=[
+                ("opreg", self.N),    # Operation register
+                ("mem_0", self.N),    # Storage register
+            ]
+        )
 
         # Build initial_layout: logical qubit -> physical qubit
-        # Logical qubits 0..N-1 are Storage Register
-        # Logical qubits N..2N-1 are Operation Register
-        # For each operation pair i, assign:
-        #   logical qubit i        -> first qubit of physical pair i
-        #   logical qubit N+i      -> second qubit of physical pair i
+        # Logical qubits 0..N-1 are Storage Register (mem_0)
+        # Logical qubits N..2N-1 are Operation Register (opreg)
         initial_layout: list[int] = [0] * (2 * self.N)
-        for i, (phys_q1, phys_q2) in enumerate(physical_pairs):
-            initial_layout[i] = phys_q1              # Storage qubit i
-            initial_layout[self.N + i] = phys_q2     # Operation qubit i
+        for i in range(self.N):
+            initial_layout[i] = allocation["mem_0"][i]          # Storage qubits
+            initial_layout[self.N + i] = allocation["opreg"][i] # Operation qubits
 
         # ── Transpile with qubit mapping ──────────────────────────────────────
         sim  = AerSimulator(noise_model=self.noise_model)
-        qc_t = transpile(qc, backend=sim, optimization_level=0, initial_layout=initial_layout)
+        qc_t = transpile(qc, backend=self.backend, optimization_level=0, initial_layout=initial_layout)
         job  = sim.run(qc_t, shots=shots)
         counts: dict[str, int] = job.result().get_counts()
 
-        zero_state = "0" * (2 * self.N)
+        zero_state = "0" * self.N
         return counts.get(zero_state, 0) / shots
 
     # ── RB Characterization (Magesan) ─────────────────────────────────────────
@@ -286,7 +268,8 @@ class CMaxValidator:
                    label=f"Asymptote B = {B_fit:.3f}")
         ax.set_xlabel("m  (number of SWAPs)", fontsize=12)
         ax.set_ylabel("F(m)  — base state survival", fontsize=12)
-        ax.set_title("SQTM — RB Decay Curve (Magesan 2012) N={}".format(self.N), fontsize=13)
+        ax.set_title(f"SWAP Decay Curve (N={self.N}, d={self.d})", 
+                     fontsize=14, fontweight='bold')
         ax.legend(fontsize=10)
         ax.grid(alpha=0.3)
         ax.set_ylim(0, 1.05)
@@ -380,12 +363,13 @@ class CMaxValidator:
 
 if __name__ == "__main__":
     # 1. DEFINE THE ARCHITECTURE (N = Word width)
-    N_qubits = 2
+    N_qubits = 3
     validator = CMaxValidator(N=N_qubits)
 
     # ── Phase B.1: Complete RB characterization ───────────────────────────────
-    m_list = [0, 1, 2, 4, 6, 8, 10, 15, 20, 25, 30]
-    popt = validator.run_rb_characterization(m_list, shots=4000)
+    m_list = [0, 1, 2, 4, 6, 8, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100]
+    #m_list = [2,4,8]
+    popt = validator.run_rb_characterization(m_list, shots=4000, plot_path = "results/rb_decay_curve_swap n="+ str(N_qubits) +".png")
 
     # ── Phase B.2: Print results and validate model ───────────────────────────
     r_emp = validator.print_rb_results(popt)
