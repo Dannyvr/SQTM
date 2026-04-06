@@ -9,14 +9,16 @@ from typing import Any, Dict, List, Tuple, Optional
 import sys
 import os
 import numpy as np
+import random
 
 # Ensure project root is in path for direct execution
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, circuit, transpile
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
+from qiskit.circuit import Instruction
 from qiskit_ibm_runtime.fake_provider import FakeKyiv, FakeBrisbane
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import NoiseModel
+from qiskit_aer.noise import NoiseModel, thermal_relaxation_error
 
 from src.modular_circuits.qpc import QPC
 from src.modular_circuits.memory_register import StorageRegister
@@ -48,6 +50,7 @@ class SQTMCompiler:
         c_max: int,
         t_max_ns: float,
         backend_name: str = "FakeKyiv",
+        initial_state: int = 0,
     ):
         """
         Initialize the SQTM Compiler.
@@ -64,18 +67,46 @@ class SQTMCompiler:
             Maximum passive desgaste threshold (idle time in nanoseconds).
         backend_name : str, optional
             Name of fake backend for compilation. Default is "FakeKyiv".
+        initial_state : int, optional
+            Initial quantum state for fidelity calculation: 0 for |0⟩ state, 1 for |1⟩ state. Default is 0.
         """
         self.R = R
         self.n = n
         self.c_max = c_max
         self.t_max_ns = t_max_ns
+        self.initial_state = initial_state
 
         # ──────────────────────────────────────────────────────────
         # 1. Initialize backend and qubit resources
         # ──────────────────────────────────────────────────────────
         # NOTE: Aligned with SwapCompiler — using FakeKyiv for consistency
         self.backend = FakeKyiv()
+        
+        # CRITICAL: Use EMPTY noise model instead of backend's calibration
+        # Reason: Backend noise includes gate errors, readout errors, etc.
+        # We want ONLY thermal relaxation on idle periods for clean comparison
         self.noise_model = NoiseModel.from_backend(self.backend)
+
+        # ──────────────────────────────────────────────────────────
+        # 1b. Create thermal relaxation error linked to 'id' gate
+        # ──────────────────────────────────────────────────────────
+        # T1 and T2 times for FakeKyiv (typical NISQ parameters)
+        t1_ns = 150_000  # 150 μs
+        t2_ns = 100_000  # 100 μs
+        self.time_idle_ns = 70  # One IDLE unit = 70 ns (equivalent to one gate cycle)
+        
+        # Create thermal relaxation error for the idle period
+        idle_error = thermal_relaxation_error(t1_ns, t2_ns, self.time_idle_ns)
+        
+        # Inject thermal relaxation ONLY to 'id' gate (applied during IDLE periods)
+        # This is a pure thermal decay model without backend calibration errors
+        num_physical_qubits = self.backend.configuration().n_qubits
+        for q in range(num_physical_qubits):
+            self.noise_model.add_quantum_error(idle_error, 'id', [q],warnings=False)
+        
+        print(f"[SQTM Compiler] Thermal relaxation configured: T1={t1_ns/1000:.1f}μs, T2={t2_ns/1000:.1f}μs")
+        print(f"[SQTM Compiler] Idle period per unit: {self.time_idle_ns} ns")
+        print(f"[SQTM Compiler] Applied thermal decay to 'id' gate on {num_physical_qubits} qubits")
 
         # Initialize QubitMapper for intelligent qubit allocation
         self.qubit_mapper = QubitMapper(self.backend)
@@ -102,6 +133,15 @@ class SQTMCompiler:
 
         self.memory_registers_backup: List[StorageRegister] = [
             StorageRegister(n_qubits=n, reg_id=f"mem_backup_{i}") for i in range(R)
+        ]
+
+        # ──────────────────────────────────────────────────────────
+        # 2b. Initialize Ancilla Registers (1 per Original-Backup pair)
+        # Used for quantum teleportation protocol
+        # ──────────────────────────────────────────────────────────
+
+        self.ancilla_registers: List[OperationRegister] = [
+            OperationRegister(n_qubits=n, reg_id=f"ancilla_{i}") for i in range(R)
         ]
 
         # ──────────────────────────────────────────────────────────
@@ -133,7 +173,9 @@ class SQTMCompiler:
         # Cache for built registers (to avoid rebuilding)
         self._built_registers: Dict[str, QuantumRegister] = {}
 
+        state_label = "|0⟩" if initial_state == 0 else "|1⟩"
         print(f"[SQTM Compiler] Initialized: R={R}, n={n}, c_max={c_max}, t_max={t_max_ns} ns")
+        print(f"[SQTM Compiler] Fidelity target state: {state_label}")
         print(f"[Backend] {self.backend.__class__.__name__} with {self.qubit_mapper.n_qubits} qubits")
 
     # ──────────────────────────────────────────────────────────────
@@ -228,8 +270,13 @@ class SQTMCompiler:
         """
 
         # ──────────────────────────────────────────────────────────
+        # SEED INITIALIZATION - For reproducibility
+        # ──────────────────────────────────────────────────────────
+        random.seed(42)
+        np.random.seed(42)
+
+        # ──────────────────────────────────────────────────────────
         # Phase 0: Build register instances and allocate physical qubits
-        # ALIGNED WITH SWAP_SIMULATOR: Use chain topology allocation
         # ──────────────────────────────────────────────────────────
 
         qc = QuantumCircuit()
@@ -238,9 +285,14 @@ class SQTMCompiler:
         for i in range(self.R):
             qr_orig = self.memory_registers_original[i].build()
             qr_backup = self.memory_registers_backup[i].build()
+            qr_ancilla = self.ancilla_registers[i].build()
+            
             qc.add_register(qr_orig)
+            qc.add_register(qr_ancilla)
             qc.add_register(qr_backup)
+            
             self._built_registers[f"mem_orig_{i}"] = qr_orig
+            self._built_registers[f"ancilla_{i}"] = qr_ancilla
             self._built_registers[f"mem_backup_{i}"] = qr_backup
 
         qr_opreg = self.operation_register.build()
@@ -248,19 +300,25 @@ class SQTMCompiler:
         self._built_registers["opreg"] = qr_opreg
 
         # ──────────────────────────────────────────────────────────
-        # CHAIN TOPOLOGY ALLOCATION (ALIGNED WITH SWAP_SIMULATOR)
+        # CHAIN TOPOLOGY ALLOCATION (WITH ANCILLAS)
         # ──────────────────────────────────────────────────────────
-        # Structure: OpReg — Mem_Orig_0 — Mem_Backup_0 — Mem_Orig_1 — Mem_Backup_1 — ...
+        # Structure: OpReg — Mem_Orig_0 — Ancilla_0 — Mem_Backup_0 — Mem_Orig_1 — Ancilla_1 — Mem_Backup_1 — ...
         # This ensures direct connectivity without routing SWAPs with optimization_level=0
         # ──────────────────────────────────────────────────────────
         
-        print("\n[Compilation] Allocating chain topology (OpReg—Mem_Orig—Mem_Backup—...)...")
+        print("\n[Compilation] Allocating chain topology with ancillas...")
+        print(f"[Compilation] Structure: OpReg—Mem_Orig—Ancilla—Mem_Backup — ...")
         
-        # Build chain configuration: OpReg + Original + Backup registers in sequence
+        # Build chain configuration: OpReg + (Original + Ancilla + Backup) x R
         chain_config = [("opreg", self.n)]
         for i in range(self.R):
             chain_config.append((f"mem_orig_{i}", self.n))
+            chain_config.append((f"ancilla_{i}", self.n))
             chain_config.append((f"mem_backup_{i}", self.n))
+        
+        total_qubits_needed = sum(size for _, size in chain_config)
+        print(f"[Compilation] Total qubits needed: {total_qubits_needed}")
+        print(f"[Compilation] Chain config: {chain_config}")
         
         # Allocate the linear chain
         allocation_map = self.qubit_mapper.allocate_chain_topology(chain_config)
@@ -270,7 +328,7 @@ class SQTMCompiler:
             if reg_id == "opreg":
                 qr = self._built_registers["opreg"]
             else:
-                # mem_orig_*, mem_backup_*
+                # mem_orig_*, ancilla_*, mem_backup_*
                 qr = self._built_registers[reg_id]
             
             for local_idx, physical_qubit in enumerate(physical_qubits):
@@ -278,9 +336,44 @@ class SQTMCompiler:
                 self.logical_to_physical_map[qubit_obj] = physical_qubit
                 self.qubit_register_map[physical_qubit] = reg_id
 
-        print(f"[Compilation] Physical qubit mapping:")
+        print(f"\n[Compilation] Physical qubit mapping:")
         for reg_id, phys_qubits in allocation_map.items():
             print(f"  {reg_id:20s} → {sorted(phys_qubits)}")
+        
+        print(f"\n[Compilation] Total qubits allocated: {len(self.logical_to_physical_map)}")
+
+        # ──────────────────────────────────────────────────────────
+        # Phase 0b: Prepare initial quantum state
+        # ──────────────────────────────────────────────────────────
+        
+        if self.initial_state == 1:
+            print("\n[Compilation] Preparing initial state |1...1⟩ (applying X to all qubits: memory + operation register)...")
+            # Apply X gates to ALL qubits (memory and operation register) to prepare |1...1⟩ state
+            # This ensures SWAPs don't affect the final state validation
+            
+            # Apply X to operation register
+            for qubit in qr_opreg:
+                qc.x(qubit)
+            
+            # Apply X to all memory qubits
+            for i in range(self.R):
+                qr_orig = self._built_registers[f"mem_orig_{i}"]
+                qr_backup = self._built_registers[f"mem_backup_{i}"]
+                qr_ancilla = self._built_registers[f"ancilla_{i}"]
+                # Apply X to original memory
+                for qubit in qr_orig:
+                    qc.x(qubit)
+                # Apply X to ancilla (part of superposition in teleportation)
+                for qubit in qr_ancilla:
+                    qc.x(qubit)
+                # Apply X to backup memory
+                for qubit in qr_backup:
+                    qc.x(qubit)
+            
+            qc.barrier()
+            print("[Compilation] Initial state |1...1⟩ prepared for all qubits")
+        else:
+            print("\n[Compilation] Using default initial state |0...0⟩ (no X gates applied)")
 
         print(f"\n[Compilation] Starting workload processing: {len(workload)} instructions")
 
@@ -292,14 +385,31 @@ class SQTMCompiler:
             print(f"  [Instruction] {instruction}")
 
             if instruction.startswith("IDLE_"):
-                # IDLE instruction: Replace delay with X-X pairs
-                # Each pair takes ~70ns and adds active depolarizing noise
-                num_pairs = int(instruction.split("_")[1])
-                time_ns = num_pairs * 70  # Each X-X pair: ~70ns
-                for _ in range(num_pairs):
-                    qc.x(qr_opreg)  # First X
-                    qc.x(qr_opreg)  # Second X (resets state, adds noise)
-                print(f"    -> Added {num_pairs} X-X pairs ({time_ns} ns) to operation register")
+                # IDLE instruction: Apply thermal relaxation via native 'id' gate
+                # Each IDLE unit maps to one identity gate with attached thermal noise
+                num_units = int(instruction.split("_")[1])
+                time_ns = num_units * self.time_idle_ns
+                
+                print(f"    -> Wear-down sequence: {num_units} idle units ({time_ns:.0f} ns total)")
+                
+                # Apply native identity gate to operation register
+                # The thermal_relaxation_error attached to 'id' will be applied
+                for _ in range(num_units):
+                    qc.id(qr_opreg)
+                
+                # Optional: Also apply to inactive memory registers for complete wear-down modeling
+                for i in range(self.R):
+                    qr_orig = self._built_registers[f"mem_orig_{i}"]
+                    qr_backup = self._built_registers[f"mem_backup_{i}"]
+                    qr_ancilla = self._built_registers[f"ancilla_{i}"]
+                    
+                    for _ in range(num_units):
+                        for qubit in qr_orig:
+                            qc.id(qubit)
+                        for qubit in qr_ancilla:
+                            qc.id(qubit)
+                        for qubit in qr_backup:
+                            qc.id(qubit)
                 
                 # Increment time for all active registers
                 for i in range(self.R):
@@ -442,7 +552,14 @@ class SQTMCompiler:
             - 'error': Error message if simulation failed (str, optional)
         """
 
+        # ──────────────────────────────────────────────────────────
+        # SEED SETUP FOR REPRODUCIBILITY
+        # ──────────────────────────────────────────────────────────
+        random.seed(42)
+        np.random.seed(42)
+        
         print(f"\n[Simulation] Preparing circuit for {shots} shots")
+        print(f"[Simulation] Seeds configured for reproducibility")
 
         try:
             qc_measured = circuit.copy()
@@ -466,33 +583,35 @@ class SQTMCompiler:
                 qc_measured.measure(target_reg[i], cr_final[i])
 
             # ------------------------------------------------------------------
-            # FIX: Transpilación Termodinámica y Topológica Estricta
-            # REEMPLAZANDO DELAYS CON PUERTAS X para ruido despolarizante activo
+            # TRANSPILATION WITH EXPLICIT SEEDS
             # ------------------------------------------------------------------
-            print("[Transpile] Translating to hardware topology...")
+            print("[Transpile] Translating to hardware topology with seed=42...")
             
-            # 1. Extraer layout antes de transpilación.
-            #    Los pares X-X simulan T1/T2 decay mediante ruido activo (no silencio).
+            # Extract initial layout before transpilation
             initial_layout = self._get_initial_layout(qc_measured)
             
-            # 2. Inicializar el simulador y su modelo de ruido usando Matrix Product State (MPS)
-            # MPS permite simular los 127 qubits del backend sin explotar la memoria RAM.
-            print(qc_measured.draw(output="text"))
             print("[Noise Model] Extracting noise characteristics...")
+            print(qc_measured.draw(output="text"))
             noise_model = NoiseModel.from_backend(self.backend)
-            simulator = AerSimulator(noise_model=noise_model, method='matrix_product_state')
             
-            # 3. Transpilar hacia el BACKEND REAL (self.backend) para forzar la topología Heavy-Hex.
-            # Sin scheduling_method porque usamos X-gates en lugar de Delays (sin conflicto ConstrainedReschedule).
+            # Initialize simulator with MPS method and fixed seed
+            simulator = AerSimulator(
+                noise_model=noise_model, 
+                method='matrix_product_state',
+                seed_simulator=42
+            )
+            
+            # Transpile with seed for reproducibility
             qc_transpiled = transpile(
                 qc_measured,
                 backend=self.backend,
                 optimization_level=0,
-                initial_layout=initial_layout
+                initial_layout=initial_layout,
+                seed_transpiler=42
             )
             
-            print(f"[Simulator] Running {shots} shots...")
-            job = simulator.run(qc_transpiled, shots=shots)
+            print(f"[Simulator] Running {shots} shots with fixed seed...")
+            job = simulator.run(qc_transpiled, shots=shots, seed=42)
             result = job.result()
             
             counts = result.get_counts()
@@ -500,7 +619,7 @@ class SQTMCompiler:
             
             # Extract results: The last added classical register is always the first block (leftmost) in Qiskit output
             fidelity_count = 0
-            target_state = '0' * self.n
+            target_state = ('1' * self.n) if self.initial_state == 1 else ('0' * self.n)
             for outcome, count in counts.items():
                 dest_bits = outcome.split()[0]  
                 if dest_bits == target_state:
@@ -513,8 +632,9 @@ class SQTMCompiler:
             print(f"  Clbits: {qc_transpiled.num_clbits}")
             print(f"  Depth: {qc_transpiled.depth()}")
             print(f"  Size: {qc_transpiled.size()}")
-            #print(qc_transpiled.draw(output="text"))  
-            print(f"  Fidelity (|0...0> success): {fidelity:.4f}")
+            
+            state_label = "|1...1>" if self.initial_state == 1 else "|0...0>"
+            print(f"  Fidelity ({state_label} success): {fidelity:.4f}")
             
             # Show top outcomes
             if counts:

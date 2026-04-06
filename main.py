@@ -23,28 +23,33 @@ t_max_ns = 50000.0  # Time threshold (nanoseconds)
 # Simulation Configuration
 shots = 4000    # Number of simulation shots
 
+# Quantum State Configuration
+# Set initial_state = 0 for |0⟩ target, or 1 for |1⟩ target
+initial_state = 1  # 0 = |0⟩ state, 1 = |1⟩ state
+
 # Test Workloads
 workload1 = [
     "READ_00",
-    "READ_00"
+    "IDLE_1",
+
 ]
 
 workload2 = [
     "READ_00",
+    "IDLE_1",
     "READ_00",
+    "IDLE_1",
     "READ_00",
-    "READ_00",
+
 ]
 
 workload3 = [
     "READ_00",
+    "IDLE_1",
     "READ_00",
+    "IDLE_1",
     "READ_00",
-    "READ_00",
-    "READ_00",
-    "READ_00",
-    "READ_00",
-    "READ_00",
+    "IDLE_1",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -64,6 +69,8 @@ def main():
     print(f"  Shots: {shots}")
     print(f"  Gate Cost Threshold: {c_max}")
     print(f"  Time Threshold: {t_max_ns} ns")
+    state_label = "|1⟩" if initial_state == 1 else "|0⟩"
+    print(f"  Target Quantum State: {state_label}")
 
     # Run comparative analysis with all workloads
     workloads = [
@@ -86,7 +93,8 @@ def main():
         c_max=c_max,
         t_max_ns=t_max_ns,
         shots=shots,
-        workloads=workloads
+        workloads=workloads,
+        initial_state=initial_state
     )
 
 

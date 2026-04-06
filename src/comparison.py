@@ -5,6 +5,8 @@
 
 import sys
 import os
+import random
+import numpy as np
 from typing import List, Tuple, Dict, Any, Optional
 
 # Ensure project root is in path
@@ -19,7 +21,7 @@ from src.simulator.swap_simulator import SwapCompiler
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_sqtm_compiler(R: int, n: int, c_max: int, t_max_ns: float, 
-                     workload: List[str], shots: int) -> Optional[Dict[str, Any]]:
+                     workload: List[str], shots: int, initial_state: int = 0) -> Optional[Dict[str, Any]]:
     """
     Execute SQTM Compiler (Dual-register memory with quantum teleportation).
     
@@ -30,16 +32,25 @@ def run_sqtm_compiler(R: int, n: int, c_max: int, t_max_ns: float,
         t_max_ns: Time threshold in nanoseconds
         workload: List of instructions (READ/WRITE)
         shots: Number of simulation shots
+        initial_state: Initial quantum state for fidelity (0 for |0⟩, 1 for |1⟩)
     
     Returns:
         Dictionary with simulation results
     """
+    # ──────────────────────────────────────────────────────────
+    # SEED INITIALIZATION - For global reproducibility
+    # ──────────────────────────────────────────────────────────
+    random.seed(42)
+    np.random.seed(42)
+    
     print("\n" + "=" * 70)
-    print("SQTM Compiler - Dual-Register Memory with Quantum Teleportation")
+    state_label = "|1⟩" if initial_state == 1 else "|0⟩"
+    print(f"SQTM Compiler - Dual-Register Memory with Quantum Teleportation")
+    print(f"Target state: {state_label}")
     print("=" * 70)
 
-    # Create compiler
-    sqtm = SQTMCompiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns)
+    # Create compiler with initial state parameter
+    sqtm = SQTMCompiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns, initial_state=initial_state)
 
     # Display workload
     print(f"\n[Workload] Executing {len(workload)} instructions:")
@@ -84,7 +95,7 @@ def run_sqtm_compiler(R: int, n: int, c_max: int, t_max_ns: float,
 
 
 def run_swap_compiler(R: int, n: int, c_max: int, t_max_ns: float,
-                     workload: List[str], shots: int) -> Optional[Dict[str, Any]]:
+                     workload: List[str], shots: int, initial_state: int = 0) -> Optional[Dict[str, Any]]:
     """
     Execute SWAP Compiler (Single-register memory, baseline comparison).
     
@@ -95,16 +106,25 @@ def run_swap_compiler(R: int, n: int, c_max: int, t_max_ns: float,
         t_max_ns: Time threshold in nanoseconds
         workload: List of instructions (READ/WRITE)
         shots: Number of simulation shots
+        initial_state: Initial quantum state for fidelity (0 for |0⟩, 1 for |1⟩)
     
     Returns:
         Dictionary with simulation results
     """
+    # ──────────────────────────────────────────────────────────
+    # SEED INITIALIZATION - For global reproducibility
+    # ──────────────────────────────────────────────────────────
+    random.seed(42)
+    np.random.seed(42)
+    
     print("\n" + "=" * 70)
-    print("SWAP Compiler - Single-Register Memory (Baseline)")
+    state_label = "|1⟩" if initial_state == 1 else "|0⟩"
+    print(f"SWAP Compiler - Single-Register Memory (Baseline)")
+    print(f"Target state: {state_label}")
     print("=" * 70)
 
-    # Create compiler
-    swap = SwapCompiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns, backend_name="FakeKyiv")
+    # Create compiler with initial state parameter
+    swap = SwapCompiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns, backend_name="FakeKyiv", initial_state=initial_state)
 
     # Display workload
     print(f"\n[Workload] Executing {len(workload)} instructions:")
@@ -153,7 +173,7 @@ def run_swap_compiler(R: int, n: int, c_max: int, t_max_ns: float,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_workload(R: int, n: int, c_max: int, t_max_ns: float,
-                    workload_name: str, workload: List[str], shots: int) -> Optional[Dict[str, Any]]:
+                    workload_name: str, workload: List[str], shots: int, initial_state: int = 0) -> Optional[Dict[str, Any]]:
     """
     Run both compilers on a single workload and perform comparative analysis.
     
@@ -165,23 +185,25 @@ def analyze_workload(R: int, n: int, c_max: int, t_max_ns: float,
         workload_name: Name of the workload
         workload: List of instructions
         shots: Number of simulation shots
+        initial_state: Initial quantum state for fidelity (0 for |0⟩, 1 for |1⟩)
     
     Returns:
         Dictionary with comparative results
     """
     print("\n" + "█" * 70)
     print("█" + " " * 68 + "█")
-    print("█" + f"  {workload_name}".center(68) + "█")
+    state_label = "|1⟩" if initial_state == 1 else "|0⟩"
+    print("█" + f"  {workload_name} — Target: {state_label}".center(68) + "█")
     print("█" + " " * 68 + "█")
     print("█" * 70)
 
     # Run SQTM
     sqtm_results = run_sqtm_compiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns,
-                                     workload=workload, shots=shots)
+                                     workload=workload, shots=shots, initial_state=initial_state)
 
     # Run SWAP
     swap_results = run_swap_compiler(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns,
-                                     workload=workload, shots=shots)
+                                     workload=workload, shots=shots, initial_state=initial_state)
 
     # Comparative Analysis
     print("\n" + "=" * 70)
@@ -233,7 +255,7 @@ def analyze_workload(R: int, n: int, c_max: int, t_max_ns: float,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_full_comparison(R: int, n: int, c_max: int, t_max_ns: float,
-                       shots: int, workloads: List[Tuple[str, List[str]]]) -> None:
+                       shots: int, workloads: List[Tuple[str, List[str]]], initial_state: int = 0) -> None:
     """
     Execute full comparative analysis across all workloads.
     
@@ -244,6 +266,7 @@ def run_full_comparison(R: int, n: int, c_max: int, t_max_ns: float,
         t_max_ns: Time threshold in nanoseconds
         shots: Number of simulation shots
         workloads: List of (name, instructions) tuples
+        initial_state: Initial quantum state for fidelity (0 for |0⟩, 1 for |1⟩)
     """
     
     # Summary tracking
@@ -253,7 +276,7 @@ def run_full_comparison(R: int, n: int, c_max: int, t_max_ns: float,
     for workload_name, workload in workloads:
         result = analyze_workload(R=R, n=n, c_max=c_max, t_max_ns=t_max_ns,
                                  workload_name=workload_name, 
-                                 workload=workload, shots=shots)
+                                 workload=workload, shots=shots, initial_state=initial_state)
         if result:
             results.append(result)
 
