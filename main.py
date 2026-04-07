@@ -15,7 +15,7 @@ from src.comparison import run_full_comparison
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Compiler Configuration
-R = 1           # Number of memory registers
+R = 2           # Number of memory registers
 n = 1           # Qubits per register (quantum word width)
 c_max = 4       # Gate cost threshold
 t_max_ns = 50000.0  # Time threshold (nanoseconds)
@@ -25,7 +25,7 @@ shots = 4000    # Number of simulation shots
 
 # Quantum State Configuration
 # Set initial_state = 0 for |0⟩ target, or 1 for |1⟩ target
-initial_state = 1  # 0 = |0⟩ state, 1 = |1⟩ state
+initial_state = 0  # 0 = |0⟩ state, 1 = |1⟩ state
 
 # Test Workloads
 workload1 = [
@@ -37,7 +37,7 @@ workload1 = [
 workload2 = [
     "READ_00",
     "IDLE_1",
-    "READ_00",
+    "READ_01",
     "IDLE_1",
     "READ_00",
 
@@ -48,9 +48,52 @@ workload3 = [
     "IDLE_1",
     "READ_00",
     "IDLE_1",
-    "READ_00",
+    "READ_01",
     "IDLE_1",
 ]
+
+workload4 = [
+    "READ_00",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_1",
+]
+
+workload5 = [
+    "READ_00",
+    "IDLE_2",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_5",
+    "READ_00",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_2",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_5",
+    "READ_00",
+    "IDLE_1",
+    "READ_00",
+    "IDLE_1",
+    "READ_01",
+    "IDLE_1",
+]
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Main Entry Point
@@ -77,6 +120,8 @@ def main():
         ("Workload 1 (2 instructions)", workload1),
         ("Workload 2 (4 instructions)", workload2),
         ("Workload 3 (8 instructions)", workload3),
+        ("Workload 4 (12 instructions)", workload4),
+        ("Workload 5 (16 instructions)", workload5),
     ]
 
     print("\n[Workloads]")

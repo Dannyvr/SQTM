@@ -33,10 +33,6 @@ class QubitMapper:
         # Track allocated qubits
         self.available_qubits: Set[int] = set(range(self.n_qubits))
         self.allocation_map: Dict[str, List[int]] = {}
-        
-        #print(f"[QubitMapper] Backend: {backend.__class__.__name__}")
-        #print(f"[QubitMapper] Total qubits: {self.n_qubits}")
-        #print(f"[QubitMapper] Coupling edges: {len(self.coupling_map)}")
 
     # ──────────────────────────────────────────────────────────────
     # 1. CONNECTIVITY ANALYSIS

@@ -70,7 +70,6 @@ def run_sqtm_compiler(R: int, n: int, c_max: int, t_max_ns: float,
     print(f"\n[Compiler State]")
     print(f"  Available physical qubits: {state['available_qubits']}")
 
-    # Run simulation
     print("\n" + "-" * 70)
     print("SIMULATION PHASE")
     print("-" * 70)
@@ -144,7 +143,6 @@ def run_swap_compiler(R: int, n: int, c_max: int, t_max_ns: float,
     print(f"\n[Compiler State]")
     print(f"  Available physical qubits: {state['available_qubits']}")
 
-    # Run simulation
     print("\n" + "-" * 70)
     print("SIMULATION PHASE")
     print("-" * 70)

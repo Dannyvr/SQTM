@@ -30,9 +30,6 @@ class OperationRegister:
         self._n_qubits: int = n_qubits
         self._reg_id: str = reg_id
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
 
     @property
     def n_qubits(self) -> int:
@@ -49,9 +46,6 @@ class OperationRegister:
         """Nombre que tendrá el QuantumRegister resultante."""
         return f"Q_{self._reg_id}" if self._reg_id else "Q"
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def build(self) -> QuantumRegister:
         """Construye y devuelve el QuantumRegister operacional.
@@ -64,9 +58,6 @@ class OperationRegister:
         """
         return QuantumRegister(self._n_qubits, name=self.name)
 
-    # ------------------------------------------------------------------
-    # Dunder helpers
-    # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
         """Representación en string del registro operacional."""

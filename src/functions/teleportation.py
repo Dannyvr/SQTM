@@ -48,10 +48,8 @@ class SystolicTeleportation:
         # 1. GET OR CREATE BUS INTERNAL RESOURCES (Reuse on multiple calls)
         # ──────────────────────────────────────────────────────────────
         
-        # Create a key for caching: (source_name, dest_name)
         cache_key = (source_reg.name, dest_reg.name)
         
-        # Check if ancilla and classical registers already exist
         if cache_key not in self._ancilla_cache:
             # PRIMERA VEZ: Crear los registros ancilla y clásico
             ancilla_name = f"ancilla_{source_reg.name}_to_{dest_reg.name}"

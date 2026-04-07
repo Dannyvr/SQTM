@@ -70,11 +70,9 @@ def run_work_phase_simulation(N: int = 2, shots: int = 1024) -> Dict[str, int]:
     
     print(f"\n[3] Preparing Asymmetric Initial States...")
     
-    # Storage Register: X on qubit 0 → State = |01>
     qc.x(storage_reg[0])
     print(f"    - Storage Register qubit[0]: X gate → State = |1...>")
     
-    # Operation Register: X on qubit 1 → State = |10>
     qc.x(operation_reg[1])
     print(f"    - Operation Register qubit[1]: X gate → State = |.1..>")
     

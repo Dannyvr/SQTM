@@ -79,12 +79,7 @@ class SQTMCompiler:
         # ──────────────────────────────────────────────────────────
         # 1. Initialize backend and qubit resources
         # ──────────────────────────────────────────────────────────
-        # NOTE: Aligned with SwapCompiler — using FakeKyiv for consistency
         self.backend = FakeKyiv()
-        
-        # CRITICAL: Use EMPTY noise model instead of backend's calibration
-        # Reason: Backend noise includes gate errors, readout errors, etc.
-        # We want ONLY thermal relaxation on idle periods for clean comparison
         self.noise_model = NoiseModel.from_backend(self.backend)
 
         # ──────────────────────────────────────────────────────────
@@ -98,8 +93,7 @@ class SQTMCompiler:
         # Create thermal relaxation error for the idle period
         idle_error = thermal_relaxation_error(t1_ns, t2_ns, self.time_idle_ns)
         
-        # Inject thermal relaxation ONLY to 'id' gate (applied during IDLE periods)
-        # This is a pure thermal decay model without backend calibration errors
+        # Inject thermal relaxation to 'id' gate (applied during IDLE periods)
         num_physical_qubits = self.backend.configuration().n_qubits
         for q in range(num_physical_qubits):
             self.noise_model.add_quantum_error(idle_error, 'id', [q],warnings=False)

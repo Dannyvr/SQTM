@@ -12,10 +12,6 @@ class StorageRegister:
         self._n_qubits: int = n_qubits
         self._reg_id: str = reg_id
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
-
     @property
     def n_qubits(self) -> int:
         """Número de qubits del registro."""
@@ -31,10 +27,6 @@ class StorageRegister:
         """Nombre que tendrá el QuantumRegister resultante."""
         return f"R_{self._reg_id}" if self._reg_id else "R"
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def build(self) -> QuantumRegister:
         """Construye y devuelve el QuantumRegister de almacenamiento.
 
@@ -46,9 +38,6 @@ class StorageRegister:
         """
         return QuantumRegister(self._n_qubits, name=self.name)
 
-    # ------------------------------------------------------------------
-    # Dunder helpers
-    # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
         parts = [f"n_qubits={self._n_qubits}"]
