@@ -204,11 +204,7 @@ class CMaxValidator:
         qc.barrier()
         
         # 3d. FEED-FORWARD (Data Movement Correction)
-        # NOTE: AerSimulator does not support dynamic conditionals with mid-circuit
-        # measurements, so these if_test blocks will NOT execute dynamically.
-        # Instead, we post-select classically based on measurement outcomes.
-        # The following code documents the "ideal" protocol; post-selection replaces it.
-        
+             
         for i in range(self.N):
             # If LA[i] measured as 1, apply X to LB[i]
             # (corrects for phase flip in Bell measurement)
